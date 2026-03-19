@@ -3,161 +3,184 @@ from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import numpy as np
 
-# --- CONFIGURACIÓN ESTÉTICA (Estilo Toyota) ---
-st.set_page_config(page_title="Dashboard RRHH Autolux", layout="wide")
+# --- 1. CONFIGURACIÓN DE PÁGINA Y ESTILO ---
+st.set_page_config(page_title="Dashboard Autolux", layout="wide")
 
+# Estilo CSS para replicar la estética de Power BI (Toyota Red)
 st.markdown("""
     <style>
     .stApp { background-color: #FFFFFF; }
-    [data-testid="stMetricValue"] { color: #EB0A1E; font-weight: bold; }
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; background-color: #F0F2F6; border-radius: 4px 4px 0 0; padding: 10px; }
-    .stTabs [aria-selected="true"] { background-color: #EB0A1E !important; color: white !important; }
+    h1 { color: #EB0A1E; font-family: 'Arial'; font-weight: bold; }
+    .stMetric { background-color: #f9f9f9; border: 1px solid #e6e6e6; padding: 15px; border-radius: 5px; }
+    div[data-testid="stMetricValue"] { color: #000000; font-size: 45px !important; }
+    div[data-testid="stMetricLabel"] { color: #EB0A1E; font-weight: bold; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; }
+    .stTabs [data-baseweb="tab"] { 
+        background-color: #f0f2f6; 
+        border-radius: 4px 4px 0 0; 
+        padding: 10px 20px; 
+        font-weight: bold;
+    }
+    .stTabs [aria-selected="true"] { background-color: #004F43 !important; color: white !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- CONEXIÓN A DATOS ---
+# --- 2. CARGA DE DATOS ---
 url = "https://docs.google.com/spreadsheets/d/156gG4r3krIiXEF9nIqsoJoh9YB_kcdhJittobHbxZ9s/edit?gid=1344313191#gid=1344313191"
 
 @st.cache_data(ttl=600)
-def load_data(url):
+def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
-    # Leemos la hoja, asegurándonos de que tome la primera fila como cabecera
     df = conn.read(spreadsheet=url)
     return df
 
-df = load_data(url)
+df_raw = load_data()
+df = df_raw.copy()
 
-# --- TÍTULO Y LOGO ---
-col_t1, col_t2 = st.columns([3, 1])
-with col_t1:
-    st.title("Sistema de Visualización de Nómina - Autolux")
-with col_t2:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/e/ee/Toyota_logo_%28Red%29.svg", width=150)
+# --- 3. PREPARACIÓN DE DATOS (ETL) ---
+# Limpieza de columnas críticas
+for col in ['ESTADO', 'EMPRESA', 'Declarados', 'Area', 'Localidad', 'Puesto']:
+    if col in df.columns:
+        df[col] = df[col].astype(str).str.strip()
 
-# --- NAVEGACIÓN POR TABS (Réplica de tu Power BI) ---
-tabs = st.tabs([
-    "ESTRUCTURA", 
-    "ESTRUCTURA TASA", 
-    "ROTACIÓN", 
-    "AUSENTISMO", 
-    "PERFORMANCE/OTROS"
-])
+# Procesamiento de Fechas
+if 'Fecha Ingreso' in df.columns:
+    df['Fecha Ingreso'] = pd.to_datetime(df['Fecha Ingreso'], errors='coerce')
+    df['Año'] = df['Fecha Ingreso'].dt.year.fillna(0).astype(int)
+    df['Mes'] = df['Fecha Ingreso'].dt.month_name()
+    df['AñoMes'] = df['Fecha Ingreso'].dt.strftime('%Y-%m')
+
+# Cálculo de Antigüedad
+if 'Fecha Ingreso' in df.columns:
+    hoy = pd.Timestamp.now()
+    df['Meses_Antiguedad'] = ((hoy - df['Fecha Ingreso']).dt.days / 30).fillna(0)
+    conditions = [
+        (df['Meses_Antiguedad'] <= 12),
+        (df['Meses_Antiguedad'] > 12) & (df['Meses_Antiguedad'] <= 36),
+        (df['Meses_Antiguedad'] > 36) & (df['Meses_Antiguedad'] <= 60),
+        (df['Meses_Antiguedad'] > 60)
+    ]
+    labels = ['Hasta 1 año', '1-3 años', '3-5 años', 'Más de 5 años']
+    df['Rango Antiguedad'] = np.select(conditions, labels, default='Sin Dato')
+
+# --- 4. INTERFAZ ---
+header_col1, header_col2 = st.columns([4, 1])
+with header_col1:
+    st.title("ESTRUCTURA")
+with header_col2:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/e/ee/Toyota_logo_%28Red%29.svg", width=120)
+    st.markdown("<p style='text-align:right; font-weight:bold;'>Autolux</p>", unsafe_allow_html=True)
+
+tabs = st.tabs(["ESTRUCTURA", "ESTRUCTURA TASA", "ROTACIÓN", "AUSENTISMO"])
 
 # ==========================================
-# 1. TAB ESTRUCTURA (Real)
+# PESTAÑA 1: ESTRUCTURA (Activos Autolux)
 # ==========================================
 with tabs[0]:
-    st.subheader("Análisis de Estructura Real")
-    
-    # Filtros dinámicos (Usando nombres comunes, ajusta si varían)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        # Nota: Si en tu base 'Localidad' se llama distinto, cambia el nombre del string aquí
-        loc_list = df['Localidad'].unique() if 'Localidad' in df.columns else []
-        sel_loc = st.multiselect("Filtrar por Localidad", loc_list)
-    
-    df_filtered = df.copy()
-    if sel_loc:
-        df_filtered = df[df['Localidad'].isin(sel_loc)]
+    # Filtro base obligatorio
+    df_activos = df[(df['ESTADO'] == 'ACTIVO') & (df['EMPRESA'] == 'AUTOLUX')].copy()
 
-    col_kpi1, col_kpi2 = st.columns([1, 3])
-    with col_kpi1:
-        st.metric("Dotación Real", len(df_filtered))
-        if 'Area' in df_filtered.columns:
-            st.write("**Dotación por Área:**")
-            st.dataframe(df_filtered['Area'].value_counts(), use_container_width=True)
+    # Filtros Interactivos Superiores
+    f1, f2, f3, f4 = st.columns(4)
+    with f1:
+        sel_loc = st.multiselect("Localidad", sorted(df_activos['Localidad'].unique() if 'Localidad' in df_activos.columns else []))
+    with f2:
+        sel_mes = st.multiselect("Mes", sorted(df_activos['Mes'].unique() if 'Mes' in df_activos.columns else []))
+    with f3:
+        sel_anio = st.multiselect("Año", sorted(df_activos['Año'].unique() if 'Año' in df_activos.columns else []))
+    with f4:
+        sel_area = st.multiselect("Área", sorted(df_activos['Area'].unique() if 'Area' in df_activos.columns else []))
 
-    with col_kpi2:
-        if 'Rango Antiguedad' in df_filtered.columns:
-            fig_ant = px.pie(df_filtered, names='Rango Antiguedad', hole=0.5, 
-                             color_discrete_sequence=['#EB0A1E', '#58595B', '#939598', '#D1D3D4'])
-            fig_ant.update_layout(title="Distribución por Antigüedad")
-            st.plotly_chart(fig_ant, use_container_width=True)
+    # Aplicar filtros
+    dff = df_activos.copy()
+    if sel_loc: dff = dff[dff['Localidad'].isin(sel_loc)]
+    if sel_mes: dff = dff[dff['Mes'].isin(sel_mes)]
+    if sel_anio: dff = dff[dff['Año'].isin(sel_anio)]
+    if sel_area: dff = dff[dff['Area'].isin(sel_area)]
+
+    col_izq, col_der = st.columns([2, 3])
+
+    with col_izq:
+        # KPI Dotación
+        st.metric("Dotación", len(dff))
+        
+        # Tabla Dinámica (Matriz)
+        st.markdown("### Detalle por Área y Puesto")
+        if all(x in dff.columns for x in ['Area', 'Puesto', 'Localidad']):
+            pivot = pd.pivot_table(dff, index=['Area', 'Puesto'], columns='Localidad', values='EMPRESA', aggfunc='count', fill_value=0, margins=True, margins_name='Total')
+            st.dataframe(pivot, use_container_width=True)
+
+    with col_der:
+        # Gráfico Histórico
+        st.markdown("### Evolución de Dotación")
+        if 'AñoMes' in dff.columns:
+            hist_data = dff.groupby('AñoMes').size().reset_index(name='Dotacion')
+            fig_line = px.line(hist_data, x='AñoMes', y='Dotacion', color_discrete_sequence=['#EB0A1E'])
+            st.plotly_chart(fig_line, use_container_width=True)
+
+        c_sub1, c_sub2 = st.columns(2)
+        with c_sub1:
+            st.markdown("### Antigüedad")
+            fig_pie = px.pie(dff, names='Rango Antiguedad', hole=0.6, color_discrete_sequence=['#EB0A1E', '#58595B', '#939598', '#D1D3D4'])
+            st.plotly_chart(fig_pie, use_container_width=True)
+        with c_sub2:
+            st.markdown("### Categoría")
+            if 'Categoría' in dff.columns:
+                cat_data = dff['Categoría'].value_counts().reset_index()
+                fig_bar = px.bar(cat_data, y='Categoría', x='count', orientation='h', color_discrete_sequence=['#EB0A1E'])
+                st.plotly_chart(fig_bar, use_container_width=True)
 
 # ==========================================
-# 2. TAB ESTRUCTURA TASA (Toyota)
+# PESTAÑA 2: ESTRUCTURA TASA
 # ==========================================
 with tabs[1]:
-    st.subheader("Estructura de Declarados (TASA)")
-    
-    # Aquí usamos la columna exacta: "Declarados"
+    st.subheader("Colaboradores Declarados en Toyota")
     if 'Declarados' in df.columns:
-        # Filtramos solo los que dicen "Declarado" (o similar)
-        # Ajustamos a mayúsculas para evitar errores de tipeo en la base
-        df_tasa = df[df['Declarados'].astype(str).str.upper().str.contains("SI|DECLARADO", na=False)]
+        # Filtramos solo Autolux para consistencia
+        df_tasa = df[df['EMPRESA'] == 'AUTOLUX'].copy()
         
-        k1, k2 = st.columns([1, 3])
-        with k1:
-            st.metric("Dotación TASA", len(df_tasa))
-            st.write(f"{(len(df_tasa)/len(df)*100):.1f}% del total")
-        
-        with k2:
-            # Gráfico comparativo Declarados vs No Declarados
-            fig_dec = px.bar(df, x='Declarados', color='Declarados',
-                             color_discrete_map={'Declarado': '#EB0A1E', 'No Declarado': '#58595B'},
-                             title="Comparativa de Declaración")
-            st.plotly_chart(fig_dec, use_container_width=True)
-    else:
-        st.error("No se encontró la columna 'Declarados' en la base.")
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            dot_tasa = len(df_tasa[df_tasa['Declarados'].str.upper().str.contains("SI|DECLARADO", na=False)])
+            st.metric("Dotación TASA", dot_tasa)
+        with c2:
+            fig_tasa = px.bar(df_tasa, x='Area', color='Declarados', barmode='group', color_discrete_map={'Declarado': '#EB0A1E', 'No Declarado': '#000000'})
+            st.plotly_chart(fig_tasa, use_container_width=True)
 
 # ==========================================
-# 3. TAB ROTACIÓN (Real vs TASA)
+# PESTAÑA 3: ROTACIÓN
 # ==========================================
 with tabs[2]:
-    st.subheader("Indicadores de Rotación Mensual")
-    
-    # Usamos las columnas exactas: "bajas de Rotación real" y "bajas de delcarados"
-    col_r1, col_r2, col_r3 = st.columns(3)
-    
-    with col_r1:
-        bajas_reales = df['bajas de Rotación real'].sum() if 'bajas de Rotación real' in df.columns else 0
-        st.metric("Bajas Totales (Real)", int(bajas_reales))
-        
-    with col_r2:
-        bajas_tasa = df['bajas de delcarados'].sum() if 'bajas de delcarados' in df.columns else 0
-        st.metric("Bajas TASA (Declarados)", int(bajas_tasa))
-        
-    with col_r3:
-        # Gauge de Target (Réplica de tu imagen)
-        fig_target = go.Figure(go.Indicator(
-            mode = "gauge+number",
-            value = 9.0, # Valor de ejemplo
-            title = {'text': "Target Rotación 2026"},
-            gauge = {'axis': {'range': [0, 15]}, 'bar': {'color': "#EB0A1E"}}
-        ))
-        fig_target.update_layout(height=250)
-        st.plotly_chart(fig_target, use_container_width=True)
+    st.subheader("Indicadores de Rotación")
+    # Usando columnas exactas: 'bajas de Rotación real' y 'bajas de delcarados'
+    r1, r2, r3 = st.columns(3)
+    with r1:
+        b_real = df['bajas de Rotación real'].sum() if 'bajas de Rotación real' in df.columns else 0
+        st.metric("Bajas Rotación Real", int(b_real))
+    with r2:
+        b_tasa = df['bajas de delcarados'].sum() if 'bajas de delcarados' in df.columns else 0
+        st.metric("Bajas Rotación TASA", int(b_tasa))
+    with r3:
+        st.write("Target 2026: **9.00%**")
+        fig_gauge = go.Figure(go.Indicator(mode="gauge+number", value=9.00, gauge={'axis': {'range': [0, 15]}, 'bar': {'color': "#EB0A1E"}}))
+        fig_gauge.update_layout(height=200)
+        st.plotly_chart(fig_gauge, use_container_width=True)
 
 # ==========================================
-# 4. TAB AUSENTISMO
+# PESTAÑA 4: AUSENTISMO
 # ==========================================
 with tabs[3]:
-    st.subheader("Análisis de Ausentismo y Licencias")
-    
-    # Usamos la columna exacta: "politica"
+    st.subheader("Análisis de Ausentismo")
+    # Usando columna exacta: 'politica'
     if 'politica' in df.columns:
-        c_aus1, c_aus2 = st.columns(2)
-        
-        with c_aus1:
-            fig_pol = px.pie(df, names='politica', title="Distribución por Política de Ausentismo",
-                             color_discrete_sequence=px.colors.sequential.Reds_r)
-            st.plotly_chart(fig_pol, use_container_width=True)
-            
-        with c_aus2:
-            # Si existe una columna de Motivo o Cantidad de Días, la graficamos
-            # Aquí asumo 'Motivo Licencia' basado en tus capturas
+        aus_col1, aus_col2 = st.columns(2)
+        with aus_col1:
+            fig_aus1 = px.pie(df, names='politica', title="Por Política", hole=0.4, color_discrete_sequence=px.colors.sequential.Reds_r)
+            st.plotly_chart(fig_aus1, use_container_width=True)
+        with aus_col2:
+            # Replicamos el gráfico de barras por motivo si existe la columna
             col_motivo = 'Motivo Licencia' if 'Motivo Licencia' in df.columns else 'politica'
-            fig_mot = px.bar(df, y=col_motivo, orientation='h', title="Días por Motivo",
-                             color_discrete_sequence=['#EB0A1E'])
-            st.plotly_chart(fig_mot, use_container_width=True)
-    else:
-        st.error("No se encontró la columna 'politica' en la base.")
-
-# ==========================================
-# 5. TAB PERFORMANCE / CAPACITACIÓN
-# ==========================================
-with tabs[4]:
-    st.info("Esta sección se alimentará de las columnas de Desempeño y Capacitación.")
-    # Aquí puedes añadir los gráficos de Performance Comercial cuando definamos las columnas exactas.
+            fig_aus2 = px.bar(df, x=col_motivo, title="Días por Motivo", color_discrete_sequence=['#EB0A1E'])
+            st.plotly_chart(fig_aus2, use_container_width=True)
