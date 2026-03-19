@@ -8,19 +8,19 @@ from datetime import datetime
 import calendar
 
 # --- 1. CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Autolux Business Intelligence", layout="wide")
+st.set_page_config(page_title="Dashboard Autolux BI", layout="wide")
 
-# Estilo CSS Personalizado (Rojo Toyota / Estilo Profesional)
+# Estilo CSS Personalizado (Identidad Toyota / Autolux)
 st.markdown("""
     <style>
     .stApp { background-color: #FFFFFF; }
-    h1, h2, h3 { color: #EB0A1E; font-family: 'Arial'; font-weight: bold; margin-bottom: 5px; }
-    .stMetric { background-color: #f8f9fa; border-left: 5px solid #EB0A1E; border-radius: 5px; padding: 15px; }
-    div[data-testid="stMetricValue"] { color: #000000; font-size: 40px !important; font-weight: bold; }
+    h1 { color: #EB0A1E; font-family: 'Arial'; font-weight: bold; margin-bottom: 0px; }
+    h3 { color: #333333; font-family: 'Arial'; font-weight: bold; }
+    .stMetric { background-color: #ffffff; border: 1px solid #EB0A1E; padding: 10px; border-radius: 5px; }
+    div[data-testid="stMetricValue"] { color: #000000; font-size: 45px !important; font-weight: bold; }
     div[data-testid="stMetricLabel"] { color: #EB0A1E; font-weight: bold; }
-    section[data-testid="stSidebar"] { background-color: #f1f3f6; }
-    .stSelectbox label { color: #333; font-weight: bold; }
-    /* Estilo para la Matriz */
+    .stTabs [aria-selected="true"] { background-color: #004F43 !important; color: white !important; font-weight: bold; }
+    /* Estilo para tablas */
     .stDataFrame { border: 1px solid #e6e6e6; border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
@@ -32,10 +32,10 @@ url = "https://docs.google.com/spreadsheets/d/156gG4r3krIiXEF9nIqsoJoh9YB_kcdhJi
 def load_data():
     conn = st.connection("gsheets", type=GSheetsConnection)
     df = conn.read(spreadsheet=url)
-    # Limpieza de nombres de columnas (quita espacios invisibles)
+    # Limpieza de nombres de columnas (quitar espacios en blanco invisibles)
     df.columns = [str(c).strip() for c in df.columns]
     
-    # Conversión de fechas respetando nombres del Sheet
+    # Conversión de fechas (Ingreso: Col G | Egreso: Col Z)
     if "Fecha de ingreso" in df.columns:
         df["Fecha de ingreso"] = pd.to_datetime(df["Fecha de ingreso"], errors='coerce')
     if "FECHA EGRESO" in df.columns:
@@ -43,25 +43,25 @@ def load_data():
     return df
 
 try:
-    df_raw = load_data()
-    df_base = df_raw.copy()
+    df_base = load_data()
 except Exception as e:
     st.error(f"Error al conectar con la base de datos: {e}")
     st.stop()
 
-# --- 3. BARRA LATERAL (FILTROS DE PERIODO HISTÓRICO) ---
+# --- 3. FILTROS DE PERIODO (Sidebar) ---
 st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/e/ee/Toyota_logo_%28Red%29.svg", width=120)
 st.sidebar.markdown("### 📅 Periodo de Análisis")
 
-# Restricción de años desde 2022
+# Restricción de años desde 2022 según requerimiento
 año_actual = datetime.now().year
-años_disponibles = [a for a in range(2022, año_actual + 1)]
-sel_año = st.sidebar.selectbox("Seleccione Año", sorted(años_disponibles, reverse=True))
+años_disponibles = sorted([a for a in range(2022, año_actual + 1)], reverse=True)
+sel_año = st.sidebar.selectbox("Seleccione Año", años_disponibles, index=0)
 
 meses_esp = {
     "Enero":1, "Febrero":2, "Marzo":3, "Abril":4, "Mayo":5, "Junio":6,
     "Julio":7, "Agosto":8, "Septiembre":9, "Octubre":10, "Noviembre":11, "Diciembre":12
 }
+# Mes por defecto es el actual
 sel_mes_nombre = st.sidebar.selectbox("Seleccione Mes", list(meses_esp.keys()), index=datetime.now().month - 1)
 sel_mes_num = meses_esp[sel_mes_nombre]
 
@@ -69,116 +69,141 @@ sel_mes_num = meses_esp[sel_mes_nombre]
 ultimo_dia = calendar.monthrange(sel_año, sel_mes_num)[1]
 fecha_corte = pd.Timestamp(datetime(sel_año, sel_mes_num, ultimo_dia))
 
-# --- 4. FILTRADO DE DOTACIÓN HISTÓRICA (Lógica DAX) ---
-# Ingreso <= Corte Y (Egreso es Nulo O Egreso > Corte) Y Empresa Autolux
-df_snapshot = df_base[
+# --- 4. LÓGICA DE DOTACIÓN HISTÓRICA ---
+# Filtro: Ingreso <= Fecha Corte Y (Egreso es Nulo O Egreso > Fecha Corte)
+df_snap = df_base[
     (df_base["Fecha de ingreso"] <= fecha_corte) & 
     ((df_base["FECHA EGRESO"].isna()) | (df_base["FECHA EGRESO"] > fecha_corte)) &
     (df_base["EMPRESA"].astype(str).str.upper() == "AUTOLUX")
 ].copy()
 
-# Filtros adicionales de Estructura
+# Filtros adicionales de Estructura (Selección única)
 st.sidebar.markdown("---")
-loc_options = ["Todas"] + sorted(df_snapshot["Localidad"].dropna().unique().tolist()) if "Localidad" in df_snapshot.columns else ["Todas"]
+loc_options = ["Todas"] + sorted(df_snap["Localidad"].dropna().unique().tolist()) if "Localidad" in df_snap.columns else ["Todas"]
 sel_loc = st.sidebar.selectbox("Localidad", loc_options)
 
-area_options = ["Todas"] + sorted(df_snapshot["Area"].dropna().unique().tolist()) if "Area" in df_snapshot.columns else ["Todas"]
+area_options = ["Todas"] + sorted(df_snap["Area"].dropna().unique().tolist()) if "Area" in df_snap.columns else ["Todas"]
 sel_area = st.sidebar.selectbox("Área", area_options)
 
-# Aplicación de filtros de selección única
-dff = df_snapshot.copy()
+# Aplicación de filtros finales
+dff = df_snap.copy()
 if sel_loc != "Todas":
     dff = dff[dff["Localidad"] == sel_loc]
 if sel_area != "Todas":
     dff = dff[dff["Area"] == sel_area]
 
 # --- 5. CUERPO DEL DASHBOARD ---
-st.title("Estructura de Dotación")
-st.markdown(f"**Análisis al:** {ultimo_dia} de {sel_mes_nombre}, {sel_año}")
+# Cabecera
+head_1, head_2 = st.columns([4, 1])
+with head_1:
+    st.markdown("<h1>ESTRUCTURA</h1>", unsafe_allow_html=True)
+with head_2:
+    st.image("https://upload.wikimedia.org/wikipedia/commons/e/ee/Toyota_logo_%28Red%29.svg", width=100)
+    st.markdown("<p style='text-align:right; font-weight:bold; margin-top:-10px;'>Autolux</p>", unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["ESTRUCTURA", "ESTRUCTURA TASA", "EVOLUCIÓN"])
+tabs = st.tabs(["ESTRUCTURA", "ESTRUCTURA TASA"])
 
 # ==========================================
-# PESTAÑA: ESTRUCTURA (Matriz Dinámica)
+# PESTAÑA 1: ESTRUCTURA
 # ==========================================
-with tab1:
-    col_kpi, _ = st.columns([1, 3])
-    with col_kpi:
-        st.metric("Dotación Activa", len(dff))
-
-    st.markdown("---")
-    st.subheader("Matriz de Colaboradores (Jerarquía: Área > Sector > Puesto)")
+with tabs[0]:
+    # Fila de KPI y Gráfico de Evolución
+    col_kpi, col_evol = st.columns([1, 3])
     
-    # Columnas para la jerarquía de filas y columnas
-    niveles_filas = [n for n in ["Area", "Sector", "Puesto"] if n in dff.columns]
+    with col_kpi:
+        st.metric("Dotación", len(dff))
+        st.write(f"Snapshot: {sel_mes_nombre} {sel_año}")
 
-    if niveles_filas and "Localidad" in dff.columns:
-        try:
-            # Creación de la Tabla Dinámica (Pivot Table)
-            matriz_dinamica = pd.pivot_table(
+    with col_evol:
+        # Cálculo de Evolución Mensual dinámica para el gráfico de líneas
+        # Se calculan los activos al final de cada mes hasta la fecha de corte
+        rango_meses = pd.date_range(start="2022-01-01", end=fecha_corte, freq='ME')
+        data_evol = []
+        for fecha in rango_meses:
+            conteo = len(df_base[
+                (df_base["Fecha de ingreso"] <= fecha) & 
+                ((df_base["FECHA EGRESO"].isna()) | (df_base["FECHA EGRESO"] > fecha)) &
+                (df_base["EMPRESA"].astype(str).str.upper() == "AUTOLUX")
+            ])
+            data_evol.append({"Fecha": fecha.strftime('%Y-%m'), "Colaboradores": conteo})
+        
+        df_linea = pd.DataFrame(data_evol)
+        fig_linea = px.line(df_linea, x="Fecha", y="Colaboradores", title="Evolución de Dotación Histórica",
+                           color_discrete_sequence=["#EB0A1E"])
+        fig_linea.update_layout(height=300, margin=dict(l=10, r=10, t=40, b=10))
+        st.plotly_chart(fig_linea, use_container_width=True)
+
+    # Fila de Matriz y Gráficos de Soporte
+    col_mat, col_pie_bar = st.columns([2.5, 2])
+
+    with col_mat:
+        st.markdown("### Matriz de Dotación (Área > Sector > Puesto)")
+        # Definición de niveles jerárquicos
+        niveles = [n for n in ["Area", "Sector", "Puesto"] if n in dff.columns]
+        
+        if niveles and "Localidad" in dff.columns:
+            # Creación de la Matriz estilo Power BI
+            pivot_matriz = pd.pivot_table(
                 dff,
-                index=niveles_filas,
+                index=niveles,
                 columns="Localidad",
-                values="EMPRESA", # Columna base para el conteo
+                values="EMPRESA",
                 aggfunc="count",
                 fill_value=0,
-                margins=True,       # Columna y fila de TOTAL
-                margins_name="Total General"
+                margins=True,
+                margins_name="Total"
             )
-            st.dataframe(matriz_dinamica, use_container_width=True, height=600)
-        except Exception as e:
-            st.error(f"Error al generar la matriz dinámica: {e}")
-    else:
-        st.warning("Verifique que las columnas 'Area', 'Sector', 'Puesto' y 'Localidad' existan en el origen de datos.")
+            st.dataframe(pivot_matriz, use_container_width=True, height=600)
 
-    # Gráficos de Soporte
-    c1, c2 = st.columns(2)
-    with c1:
-        st.markdown("### Distribución por Antigüedad")
-        def calcular_rango(fecha):
-            if pd.isna(fecha): return "Sin Dato"
-            anios = (fecha_corte - fecha).days / 365.25
+    with col_pie_bar:
+        # Gráfico de Antigüedad
+        st.markdown("### Antigüedad")
+        def calc_rango_ant(f_ing):
+            if pd.isna(f_ing): return "Sin Dato"
+            anios = (fecha_corte - f_ing).days / 365.25
             if anios <= 1: return "Hasta 1 año"
             if anios <= 3: return "1-3 años"
             if anios <= 5: return "3-5 años"
             if anios <= 10: return "5-10 años"
             return "Más de 10 años"
         
-        dff["Rango"] = dff["Fecha de ingreso"].apply(calcular_rango)
-        fig_pie = px.pie(dff, names="Rango", hole=0.5, 
+        dff["Rango_Ant"] = dff["Fecha de ingreso"].apply(calc_rango_ant)
+        orden_ant = ["Hasta 1 año", "1-3 años", "3-5 años", "5-10 años", "Más de 10 años"]
+        fig_ant = px.pie(dff, names="Rango_Ant", hole=0.5, 
                          color_discrete_sequence=px.colors.sequential.Reds_r,
-                         category_orders={"Rango": ["Hasta 1 año", "1-3 años", "3-5 años", "5-10 años", "Más de 10 años"]})
-        st.plotly_chart(fig_pie, use_container_width=True)
+                         category_orders={"Rango_Ant": orden_ant})
+        fig_ant.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0))
+        st.plotly_chart(fig_ant, use_container_width=True)
 
-    with c2:
-        st.markdown("### Dotación por Categoría")
+        # Gráfico de Categoría (Barras Horizontales)
+        st.markdown("### Categoría")
         if "Categoría" in dff.columns:
-            cat_df = dff["Categoría"].value_counts().reset_index()
-            cat_df.columns = ["Categoría", "Cant"]
-            fig_cat = px.bar(cat_df.sort_values("Cant"), y="Categoría", x="Cant", 
+            df_cat = dff["Categoría"].value_counts().reset_index()
+            df_cat.columns = ["Categoría", "Dotación"]
+            fig_cat = px.bar(df_cat.sort_values("Dotación"), y="Categoría", x="Dotación", 
                              orientation='h', color_discrete_sequence=["#EB0A1E"])
-            fig_cat.update_layout(yaxis={'title':''}, xaxis={'title':''})
+            fig_cat.update_layout(height=300, margin=dict(l=0, r=0, t=30, b=0), yaxis={'title':''})
             st.plotly_chart(fig_cat, use_container_width=True)
 
 # ==========================================
-# PESTAÑA: ESTRUCTURA TASA
+# PESTAÑA 2: ESTRUCTURA TASA
 # ==========================================
-with tab2:
+with tabs[1]:
     st.subheader("Análisis TASA (Online Toyota)")
-    col_tasa = "Declarados" # Ajustar si el nombre de columna de flag TASA es diferente
-    
+    # Columna flag para TASA
+    col_tasa = "Declarados" 
     if col_tasa in dff.columns:
-        df_on = dff[dff[col_tasa].astype(str).str.upper().str.contains("SI|DECLARADO|1", na=False)]
+        df_online = dff[dff[col_tasa].astype(str).str.upper().str.contains("SI|DECLARADO|1", na=False)]
         
-        m1, m2 = st.columns(2)
-        with m1:
-            st.metric("Dotación Histórica OnlineToyota", len(df_on))
-        with m2:
-            porcentaje = (len(df_on)/len(dff)*100) if len(dff)>0 else 0
-            st.metric("% de Declaración TASA", f"{porcentaje:.1f}%")
+        m_t1, m_t2 = st.columns(2)
+        with m_t1:
+            st.metric("Dotación Online Toyota", len(df_online))
+        with m_t2:
+            porc = (len(df_online)/len(dff)*100) if len(dff)>0 else 0
+            st.metric("% de Declaración TASA", f"{porc:.1f}%")
         
-        st.markdown("### Comparativa por Área")
-        comp_tasa = dff.groupby(["Area", col_tasa]).size().reset_index(name="Cantidad")
-        fig_tasa = px.bar(comp_tasa, x="Area", y="Cantidad", color=col_tasa, barmode="group",
+        st.markdown("### Comparativa de Declaración por Área")
+        df_comp = dff.groupby(["Area", col_tasa]).size().reset_index(name="Cantidad")
+        fig_tasa = px.bar(df_comp, x="Area", y="Cantidad", color=col_tasa, barmode="group",
                           color_discrete_map={"Declarado":"#EB0A1E", "No Declarado":"#58595B", "SI":"#EB0A1E", "NO":"#58595B"})
         st.plotly_chart(fig_tasa, use_container_width=True)
