@@ -538,7 +538,7 @@ def rotacion_periodo(fecha_ini, fecha_fin, area=None, localidad=None):
     }
 
 def build_dotacion_history(fecha_fin, area=None, localidad=None, online=None):
-    fechas = pd.date_range(start="2022-01-31", end=fecha_fin, freq="M")
+    fechas = pd.date_range(start="2022-01-31", end=fecha_fin, freq="ME")
     rows = []
     for f in fechas:
         df_aux = snapshot_filtered(f, area=area, localidad=localidad, online=online)
