@@ -687,17 +687,6 @@ with tabs[0]:
         unsafe_allow_html=True
     )
 
-    with st.expander("Diagnóstico de columnas", expanded=False):
-        st.write({
-            "Área": col_area,
-            "Sector": col_sector,
-            "Puesto": col_puesto,
-            "Localidad": col_localidad,
-            "Empresa": col_empresa,
-            "Filas df_snap": len(df_snap)
-        })
-        st.dataframe(df_snap.head(10), use_container_width=True)
-
     if col_area and col_sector and col_puesto and col_localidad and not df_snap.empty:
         pivot = pd.pivot_table(
             df_snap,
@@ -740,17 +729,23 @@ with tabs[0]:
         gridOptions["suppressAggFuncInHeader"] = True
         gridOptions["groupDefaultExpanded"] = 1
 
-        grid_response = AgGrid(
-            pivot,
-            gridOptions=gridOptions,
-            height=430,
-            theme="alpine",
-            fit_columns_on_grid_load=True,
-            update_mode=GridUpdateMode.SELECTION_CHANGED,
-            data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-            allow_unsafe_jscode=True,
-            key="matriz_estructura_powerbi"
-        )
+        try:
+            grid_response = AgGrid(
+                pivot,
+                gridOptions=gridOptions,
+                height=430,
+                theme="alpine",
+                fit_columns_on_grid_load=True,
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                allow_unsafe_jscode=True,
+                enable_enterprise_modules=True,
+                key="matriz_estructura_powerbi"
+            )
+        except Exception:
+            st.warning("No se pudo cargar la matriz interactiva. Se muestra una matriz simple de respaldo.")
+            st.dataframe(pivot, use_container_width=True, height=430, hide_index=True)
+            grid_response = {"selected_rows": []}
 
         selected = grid_response.get("selected_rows", [])
         if isinstance(selected, pd.DataFrame) and not selected.empty:
@@ -1055,4 +1050,3 @@ with tabs[3]:
                 tipo_pie = df_aus_mes.groupby(col_tipo_aus)[col_dias_aus].sum().reset_index().sort_values(col_dias_aus, ascending=False)
                 fig_pie_tipo = make_donut(tipo_pie, col_tipo_aus, col_dias_aus, "Distribución por Tipo de Licencia")
                 st.plotly_chart(fig_pie_tipo, use_container_width=True)
-
