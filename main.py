@@ -316,6 +316,13 @@ def load_nomina_data():
     df[col_ingreso] = parse_date_series(df[col_ingreso])
     df[col_egreso] = parse_date_series(df[col_egreso])
 
+    # Filtrar globalmente para tomar solo los que pertenecen a Autolux y emular el DISTINCTCOUNT de Power BI
+    if col_empresa:
+        df = df[safe_upper(df[col_empresa]) == EMPRESA_OBJETIVO.upper()].copy()
+        
+    if col_id:
+        df = df.drop_duplicates(subset=[col_id], keep="last")
+
     if col_online:
         df["flag_online_tasa"] = df[col_online].apply(classify_yes_no)
     else:
