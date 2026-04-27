@@ -26,7 +26,7 @@ EMPRESA_OBJETIVO = "AUTOLUX"
 TARGET_ROTACION_TASA = 10.0  # objetivo del gauge
 
 st.markdown(
-    f"""
+    """
     <style>
     /* Ocultar header nativo de streamlit para ahorrar espacio */
     header[data-testid="stHeader"] {
