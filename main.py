@@ -28,56 +28,97 @@ TARGET_ROTACION_TASA = 10.0  # objetivo del gauge
 st.markdown(
     f"""
     <style>
-    .stApp {{
+    /* Ocultar header nativo de streamlit para ahorrar espacio */
+    header[data-testid="stHeader"] {
+        background-color: transparent;
+    }
+
+    .stApp {
         background-color: #FFFFFF;
-    }}
-    h1, h2, h3 {{
-        color: {COLOR_ROJO};
-        font-family: Arial, sans-serif;
+    }
+    h1, h2, h3 {
+        color: #EB0A1E;
+        font-family: 'Segoe UI', Arial, sans-serif;
         font-weight: 700;
-    }}
-    .block-container {{
-        padding-top: 1rem;
+    }
+    .block-container {
+        padding-top: 1rem !important;
         padding-bottom: 1rem;
-    }}
-    div[data-testid="stMetric"] {{
+    }
+    
+    /* Mejoras de Metric Cards */
+    div[data-testid="stMetric"] {
         background-color: white;
-        border: 1px solid {COLOR_ROJO};
-        border-radius: 10px;
-        padding: 10px 14px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-    }}
-    div[data-testid="stMetricLabel"] {{
-        color: {COLOR_ROJO};
-        font-weight: 700;
-    }}
-    div[data-testid="stMetricValue"] {{
-        color: #222222;
-        font-size: 2rem !important;
-        font-weight: 700;
-    }}
-    .small-note {{
-        color: #666666;
-        font-size: 0.85rem;
-    }}
-    .section-card {{
-        background: white;
         border: 1px solid #E5E5E5;
         border-radius: 12px;
-        padding: 12px;
-    }}
-    .stTabs [data-baseweb="tab-list"] {{
+        padding: 15px 20px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    div[data-testid="stMetric"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 12px rgba(0,0,0,0.08);
+    }
+    div[data-testid="stMetricLabel"] {
+        color: #58595B;
+        font-weight: 600;
+        font-size: 1.1rem;
+    }
+    div[data-testid="stMetricValue"] {
+        color: #EB0A1E;
+        font-size: 2.2rem !important;
+        font-weight: 800;
+    }
+    
+    .small-note {
+        color: #666666;
+        font-size: 0.9rem;
+        margin-top: 4px;
+    }
+    
+    /* Encabezado Principal Sticky */
+    .sticky-header-container {
+        position: sticky;
+        top: 0px;
+        z-index: 1000;
+        background-color: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(5px);
+        padding-top: 15px;
+        padding-bottom: 10px;
+        margin-top: -1rem;
+        border-bottom: 2px solid #F0F0F0;
+    }
+
+    /* Tabs Sticky y Mejorados */
+    div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {
+        position: sticky;
+        top: 75px; /* Altura aproximada del header */
+        z-index: 990;
+        background-color: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(5px);
+        padding-top: 1rem;
+        padding-bottom: 0.5rem;
+        border-bottom: 2px solid #F0F0F0;
         gap: 8px;
-    }}
-    .stTabs [data-baseweb="tab"] {{
+    }
+    .stTabs [data-baseweb="tab"] {
         border-radius: 8px 8px 0px 0px;
-        padding: 8px 16px;
-    }}
-    .stTabs [aria-selected="true"] {{
-        background-color: {COLOR_ROJO} !important;
+        padding: 10px 20px;
+        border: 1px solid transparent;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #EB0A1E !important;
         color: white !important;
         font-weight: 700;
-    }}
+        border: 1px solid #EB0A1E;
+    }
+    
+    /* Dataframe Header styling */
+    [data-testid="stDataFrame"] {
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        border: 1px solid #E5E5E5;
+    }
     </style>
     """,
     unsafe_allow_html=True
@@ -428,7 +469,7 @@ col_nombre = meta["col_nombre"]
 # =========================================================
 # 5. FILTROS GLOBALES
 # =========================================================
-st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/e/ee/Toyota_logo_%28Red%29.svg", width=120)
+st.sidebar.image("https://upload.wikimedia.org/wikipedia/commons/e/ee/Toyota_logo_%28Red%29.svg", use_container_width=True)
 st.sidebar.markdown("## Filtros")
 
 today = datetime.now()
@@ -662,16 +703,23 @@ def dias_laborables_estimados(anio, mes):
 # =========================================================
 # 7. CABECERA
 # =========================================================
-head1, head2 = st.columns([5, 1])
-with head1:
-    st.markdown("<h1>Dashboard de Indicadores RRHH - Autolux</h1>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div class='small-note'>Período seleccionado: {sel_mes_nombre} {sel_anio} | Fecha de corte: {fecha_corte.strftime('%d/%m/%Y')}</div>",
-        unsafe_allow_html=True
-    )
-with head2:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/e/ee/Toyota_logo_%28Red%29.svg", width=95)
-    st.markdown("<div style='text-align:right;font-weight:700;'>Autolux</div>", unsafe_allow_html=True)
+st.markdown(
+    f"""
+    <div class="sticky-header-container">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div>
+                <h1 style="margin:0; padding:0;">Dashboard de Indicadores RRHH - Autolux</h1>
+                <div class="small-note">Período seleccionado: {sel_mes_nombre} {sel_anio} | Fecha de corte: {fecha_corte.strftime('%d/%m/%Y')}</div>
+            </div>
+            <div style="display: flex; flex-direction: column; align-items: flex-end;">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/e/ee/Toyota_logo_%28Red%29.svg" style="height: 45px; object-fit: contain; margin-bottom: 4px;">
+                <div style="font-weight:800; color:#58595B; font-size: 16px; letter-spacing: 1px;">Autolux</div>
+            </div>
+        </div>
+    </div>
+    """, 
+    unsafe_allow_html=True
+)
 
 tabs = st.tabs(["ESTRUCTURA", "ESTRUCTURA TASA", "ROTACIÓN", "AUSENTISMO"])
 
@@ -704,12 +752,61 @@ with tabs[0]:
     left, right = st.columns([2.2, 1.3])
 
     with left:
-        st.markdown("### Matriz de Dotación")
-        matriz = build_matriz_estructura(df_snap)
-        if not matriz.empty:
-            st.dataframe(matriz, use_container_width=True, height=520)
+        st.markdown("### Matriz de Dotación Dinámica")
+        st.markdown("<p class='small-note'>Haz clic en una fila para desglosar el nivel inferior.</p>", unsafe_allow_html=True)
+        
+        def dynamic_pivot(df, index_col, selection_key):
+            if index_col not in df.columns or col_localidad not in df.columns:
+                return None, None
+            pivot = pd.pivot_table(
+                df,
+                index=index_col,
+                columns=col_localidad,
+                values=col_empresa,
+                aggfunc="count",
+                fill_value=0,
+                margins=True,
+                margins_name="Total"
+            )
+            # Reordenar 'Total' al final
+            if "Total" in pivot.index:
+                total_row = pivot.loc[["Total"]]
+                pivot = pd.concat([pivot.drop("Total"), total_row])
+                
+            event = st.dataframe(
+                pivot,
+                use_container_width=True,
+                selection_mode="single-row",
+                on_select="rerun",
+                key=selection_key
+            )
+            selected_idx = None
+            if len(event.selection.rows) > 0:
+                row_num = event.selection.rows[0]
+                selected_idx = pivot.index[row_num]
+                if selected_idx == "Total":
+                    selected_idx = None
+            return pivot, selected_idx
+
+        selected_area = None
+        selected_sector = None
+        selected_puesto = None
+
+        if col_area and col_sector and col_puesto:
+            st.markdown("#### Nivel 1: Áreas")
+            pivot_area, selected_area = dynamic_pivot(df_snap, col_area, "matrix_area")
+            
+            if selected_area:
+                st.markdown(f"#### Nivel 2: Sectores en '{selected_area}'")
+                df_sector = df_snap[df_snap[col_area] == selected_area]
+                pivot_sector, selected_sector = dynamic_pivot(df_sector, col_sector, "matrix_sector")
+                
+                if selected_sector:
+                    st.markdown(f"#### Nivel 3: Puestos en '{selected_sector}'")
+                    df_puesto = df_sector[df_sector[col_sector] == selected_sector]
+                    pivot_puesto, selected_puesto = dynamic_pivot(df_puesto, col_puesto, "matrix_puesto")
         else:
-            st.info("No fue posible construir la matriz con las columnas actuales.")
+            st.info("No fue posible construir la matriz dinámica con las columnas actuales.")
 
     with right:
         ant_df = build_antiguedad_data(df_snap)
@@ -737,6 +834,44 @@ with tabs[0]:
                 yaxis_title=""
             )
             st.plotly_chart(fig_cat, use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### Detalle de Colaboradores")
+    df_detail = df_snap.copy()
+    
+    if selected_puesto:
+        df_detail = df_detail[
+            (df_detail[col_area] == selected_area) & 
+            (df_detail[col_sector] == selected_sector) & 
+            (df_detail[col_puesto] == selected_puesto)
+        ]
+        st.caption(f"Filtrado por Área: **{selected_area}** > Sector: **{selected_sector}** > Puesto: **{selected_puesto}**")
+    elif selected_sector:
+        df_detail = df_detail[
+            (df_detail[col_area] == selected_area) & 
+            (df_detail[col_sector] == selected_sector)
+        ]
+        st.caption(f"Filtrado por Área: **{selected_area}** > Sector: **{selected_sector}**")
+    elif selected_area:
+        df_detail = df_detail[df_detail[col_area] == selected_area]
+        st.caption(f"Filtrado por Área: **{selected_area}**")
+    else:
+        st.caption("Mostrando todos los colaboradores de la dotación actual. (Haz clic en la matriz arriba para filtrar)")
+        
+    cols_to_show = [c for c in [col_nombre, col_puesto, col_sector, col_area, col_localidad] if c and c in df_detail.columns]
+    
+    if cols_to_show:
+        rename_map = {
+            col_nombre: "Colaborador",
+            col_puesto: "Puesto",
+            col_sector: "Sector",
+            col_area: "Área",
+            col_localidad: "Localidad"
+        }
+        df_view = df_detail[cols_to_show].rename(columns=rename_map).sort_values("Colaborador", ascending=True)
+        st.dataframe(df_view, use_container_width=True, hide_index=True)
+    else:
+        st.info("No hay columnas suficientes para mostrar el detalle.")
 
 # =========================================================
 # 9. TAB 2 - ESTRUCTURA TASA
