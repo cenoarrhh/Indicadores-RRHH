@@ -7,6 +7,7 @@ from datetime import datetime
 import calendar
 import unicodedata
 import re
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 # =========================================================
 # 1. CONFIGURACIÓN GENERAL
@@ -77,27 +78,30 @@ st.markdown(
         margin-top: 4px;
     }
     
-    /* Cabecera fija: título + logo */
-    div[data-testid="element-container"]:has(.sticky-header-container) {
+    /* Encabezado Principal Sticky usando :has() */
+    div[data-testid="element-container"]:has(#mi-cabecera-fija) {
         position: sticky;
         top: 0px;
-        z-index: 9999;
+        z-index: 1000;
         background-color: rgba(255, 255, 255, 0.98);
-        padding: 12px 16px 8px 16px;
-        margin-top: -1rem;
+        padding-top: 15px;
+        padding-bottom: 10px;
+        margin-top: -15px;
         margin-left: -1rem;
         margin-right: -1rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
         border-bottom: 2px solid #F0F0F0;
     }
 
-    /* Tabs fijas debajo del título */
+    /* Tabs Sticky y Mejorados */
     div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {
         position: sticky;
-        top: 92px;
-        z-index: 9998;
+        top: 70px; /* Altura aproximada del header */
+        z-index: 990;
         background-color: rgba(255, 255, 255, 0.98);
-        padding-top: 8px;
-        padding-bottom: 6px;
+        padding-top: 10px;
+        padding-bottom: 5px;
         border-bottom: 2px solid #F0F0F0;
         gap: 8px;
     }
@@ -732,9 +736,7 @@ with tabs[0]:
     st.subheader("Estructura Real")
 
     # -----------------------------------------
-    # MATRIZ ÚNICA INTERACTIVA
-    # Nota: usamos st.dataframe con selección de fila. Es más estable en Streamlit Cloud
-    # que AgGrid y no requiere dependencia extra.
+    # MATRIZ ÚNICA INTERACTIVA TIPO POWER BI
     # -----------------------------------------
     selected_area = None
     selected_sector = None
@@ -742,27 +744,11 @@ with tabs[0]:
 
     st.markdown("### Matriz de Dotación Dinámica")
     st.markdown(
-        "<p class='small-note'>Seleccioná una fila de la matriz para filtrar Dotación, Dotación Histórica, Antigüedad, Categoría y Detalle de Colaboradores.</p>",
+        "<p class='small-note'>Expandí las filas (+) para ver Área > Sector > Puesto. Seleccioná una fila para filtrar los gráficos.</p>",
         unsafe_allow_html=True
     )
 
-    # Controles de diagnóstico para confirmar si la matriz puede armarse
-    with st.expander("Ver diagnóstico de columnas", expanded=False):
-        st.write({
-            "Área": col_area,
-            "Sector": col_sector,
-            "Puesto": col_puesto,
-            "Localidad": col_localidad,
-            "Empresa": col_empresa,
-            "Filas disponibles para matriz": len(df_snap)
-        })
-        st.write("Columnas disponibles en la base:")
-        st.write(df_snap.columns.tolist())
-
-    matriz_interactiva = pd.DataFrame()
-
     if col_area and col_sector and col_puesto and col_localidad and not df_snap.empty:
-        # Tabla plana a nivel Área > Sector > Puesto, con Localidades como columnas
         pivot = pd.pivot_table(
             df_snap,
             index=[col_area, col_sector, col_puesto],
@@ -775,34 +761,74 @@ with tabs[0]:
         if pivot.empty:
             st.warning("La matriz quedó vacía con los filtros actuales.")
         else:
-            numeric_cols = [c for c in pivot.columns if c not in [col_area, col_sector, col_puesto]]
+            numeric_cols = [
+                c for c in pivot.columns
+                if c not in [col_area, col_sector, col_puesto]
+            ]
             pivot["Total"] = pivot[numeric_cols].sum(axis=1)
 
-            # Renombramos solo para visualización, pero conservamos el vínculo con columnas originales
-            rename_matrix = {
-                col_area: "Área",
-                col_sector: "Sector",
-                col_puesto: "Puesto"
-            }
-            matriz_interactiva = pivot.rename(columns=rename_matrix)
+            gb = GridOptionsBuilder.from_dataframe(pivot)
 
-            st.caption("Tip: hacé clic sobre una fila para usarla como filtro visual.")
-            matriz_event = st.dataframe(
-                matriz_interactiva,
-                use_container_width=True,
-                hide_index=True,
+            # Jerarquía estilo Power BI
+            gb.configure_column(col_area, rowGroup=True, hide=True)
+            gb.configure_column(col_sector, rowGroup=True, hide=True)
+            gb.configure_column(col_puesto, rowGroup=True, hide=True)
+
+            # Columnas por localidad + total
+            for c in numeric_cols + ["Total"]:
+                gb.configure_column(
+                    c,
+                    type=["numericColumn", "numberColumnFilter"],
+                    aggFunc="sum",
+                    cellStyle={"textAlign": "center", "fontWeight": "600" if c == "Total" else "400"},
+                    width=95
+                )
+
+            gb.configure_selection("single", use_checkbox=False)
+
+            gridOptions = gb.build()
+            gridOptions["groupDisplayType"] = "singleColumn"
+            gridOptions["autoGroupColumnDef"] = {
+                "headerName": "Área",
+                "minWidth": 330,
+                "pinned": "left",
+                "cellRendererParams": {
+                    "suppressCount": True
+                }
+            }
+            gridOptions["defaultColDef"] = {
+                "sortable": True,
+                "resizable": True,
+                "filter": True
+            }
+            gridOptions["groupDefaultExpanded"] = 1
+            gridOptions["suppressAggFuncInHeader"] = True
+
+            grid_response = AgGrid(
+                pivot,
+                gridOptions=gridOptions,
                 height=430,
-                on_select="rerun",
-                selection_mode="single-row",
-                key="matriz_estructura_interactiva"
+                theme="alpine",
+                fit_columns_on_grid_load=True,
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                allow_unsafe_jscode=True,
+                key="matriz_estructura_powerbi"
             )
 
-            selected_rows = matriz_event.selection.rows if hasattr(matriz_event, "selection") else []
-            if selected_rows:
-                row = matriz_interactiva.iloc[selected_rows[0]].to_dict()
-                selected_area = row.get("Área")
-                selected_sector = row.get("Sector")
-                selected_puesto = row.get("Puesto")
+            selected = grid_response.get("selected_rows", [])
+
+            if isinstance(selected, pd.DataFrame) and not selected.empty:
+                row = selected.iloc[0].to_dict()
+            elif isinstance(selected, list) and len(selected) > 0:
+                row = selected[0]
+            else:
+                row = None
+
+            if row:
+                selected_area = row.get(col_area)
+                selected_sector = row.get(col_sector)
+                selected_puesto = row.get(col_puesto)
     else:
         st.warning(
             f"""
@@ -819,16 +845,16 @@ with tabs[0]:
         )
 
     # -----------------------------------------
-    # DATAFRAME FILTRADO POR SELECCIÓN DE MATRIZ
+    # DATAFRAME FILTRADO POR SELECCIÓN
     # -----------------------------------------
     df_estructura_filtrado = df_snap.copy()
 
     if selected_area:
-        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_area].astype(str) == str(selected_area)]
+        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_area] == selected_area]
     if selected_sector:
-        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_sector].astype(str) == str(selected_sector)]
+        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_sector] == selected_sector]
     if selected_puesto:
-        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_puesto].astype(str) == str(selected_puesto)]
+        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_puesto] == selected_puesto]
 
     # -----------------------------------------
     # INDICADORES Y GRÁFICOS FILTRADOS
@@ -848,12 +874,15 @@ with tabs[0]:
             st.caption("Sin selección en matriz")
 
     with c2:
+        # La evolución histórica filtra por área cuando se selecciona una fila.
+        # Para sector/puesto, se filtra la foto actual en los gráficos inferiores.
         df_hist = build_dotacion_history(
             fecha_corte,
             area=selected_area if selected_area else (None if sel_area == "Todas" else sel_area),
             localidad=None if sel_localidad == "Todas" else sel_localidad,
             online="Todos" if sel_online == "Todos" else sel_online
         )
+
         if not df_hist.empty:
             fig = make_line_chart(df_hist, "periodo", "dotacion", "Dotación Histórica")
             st.plotly_chart(fig, use_container_width=True)
@@ -889,7 +918,7 @@ with tabs[0]:
             st.plotly_chart(fig_cat, use_container_width=True)
 
     # -----------------------------------------
-    # DETALLE DE COLABORADORES FILTRADO
+    # DETALLE DE COLABORADORES
     # -----------------------------------------
     st.markdown("---")
     st.markdown("### Detalle de Colaboradores")
@@ -908,9 +937,11 @@ with tabs[0]:
             col_localidad: "Localidad"
         }
 
-        df_view = df_estructura_filtrado[cols_to_show].rename(columns=rename_map)
-        if "Colaborador" in df_view.columns:
-            df_view = df_view.sort_values("Colaborador", ascending=True)
+        df_view = (
+            df_estructura_filtrado[cols_to_show]
+            .rename(columns=rename_map)
+            .sort_values("Colaborador", ascending=True)
+        )
 
         st.dataframe(
             df_view,
@@ -921,7 +952,6 @@ with tabs[0]:
     else:
         st.info("No hay columnas suficientes para mostrar el detalle.")
 
-# =========================================================
 # 9. TAB 2 - ESTRUCTURA TASA
 # =========================================================
 with tabs[1]:
