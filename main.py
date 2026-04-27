@@ -7,7 +7,6 @@ from datetime import datetime
 import calendar
 import unicodedata
 import re
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 # =========================================================
 # 1. CONFIGURACIÓN GENERAL
@@ -83,21 +82,20 @@ st.markdown(
         position: sticky;
         top: 0px;
         z-index: 9999;
-        background-color: rgba(255,255,255,0.98);
+        background-color: rgba(255, 255, 255, 0.98);
         padding: 12px 16px 8px 16px;
         margin-top: -1rem;
         margin-left: -1rem;
         margin-right: -1rem;
         border-bottom: 2px solid #F0F0F0;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
 
-    /* Pestañas fijas debajo de la cabecera */
+    /* Tabs fijas debajo del título */
     div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {
         position: sticky;
-        top: 96px;
+        top: 92px;
         z-index: 9998;
-        background-color: rgba(255,255,255,0.98);
+        background-color: rgba(255, 255, 255, 0.98);
         padding-top: 8px;
         padding-bottom: 6px;
         border-bottom: 2px solid #F0F0F0;
@@ -115,7 +113,7 @@ st.markdown(
         font-weight: 700;
         border: 1px solid #EB0A1E;
     }
-
+    
     /* Dataframe Header styling */
     [data-testid="stDataFrame"], .ag-theme-alpine {
         border-radius: 8px;
@@ -529,7 +527,7 @@ if sel_online != "Todos":
 # =========================================================
 # 6. FUNCIONES DE NEGOCIO
 # =========================================================
-def snapshot_filtered(fecha, area=None, sector=None, puesto=None, localidad=None, online=None):
+def snapshot_filtered(fecha, area=None, localidad=None, online=None):
     df = dotacion_snapshot(
         df_nomina,
         fecha,
@@ -540,10 +538,6 @@ def snapshot_filtered(fecha, area=None, sector=None, puesto=None, localidad=None
     )
     if col_area and area not in [None, "Todas"]:
         df = df[df[col_area] == area]
-    if col_sector and sector not in [None, "Todas"]:
-        df = df[df[col_sector] == sector]
-    if col_puesto and puesto not in [None, "Todas"]:
-        df = df[df[col_puesto] == puesto]
     if col_localidad and localidad not in [None, "Todas"]:
         df = df[df[col_localidad] == localidad]
     if online not in [None, "Todos"]:
@@ -592,18 +586,11 @@ def rotacion_periodo(fecha_ini, fecha_fin, area=None, localidad=None):
         "detalle_bajas": bajas
     }
 
-def build_dotacion_history(fecha_fin, area=None, sector=None, puesto=None, localidad=None, online=None):
+def build_dotacion_history(fecha_fin, area=None, localidad=None, online=None):
     fechas = pd.date_range(start="2022-01-31", end=fecha_fin, freq="ME")
     rows = []
     for f in fechas:
-        df_aux = snapshot_filtered(
-            f,
-            area=area,
-            sector=sector,
-            puesto=puesto,
-            localidad=localidad,
-            online=online
-        )
+        df_aux = snapshot_filtered(f, area=area, localidad=localidad, online=online)
         rows.append(
             {
                 "periodo": f.strftime("%Y-%m"),
@@ -744,128 +731,126 @@ tabs = st.tabs(["ESTRUCTURA", "ESTRUCTURA TASA", "ROTACIÓN", "AUSENTISMO"])
 with tabs[0]:
     st.subheader("Estructura Real")
 
-    # -----------------------------------------------------
+    # -----------------------------------------
     # MATRIZ ÚNICA INTERACTIVA
-    # -----------------------------------------------------
+    # Nota: usamos st.dataframe con selección de fila. Es más estable en Streamlit Cloud
+    # que AgGrid y no requiere dependencia extra.
+    # -----------------------------------------
+    selected_area = None
+    selected_sector = None
+    selected_puesto = None
+
     st.markdown("### Matriz de Dotación Dinámica")
     st.markdown(
         "<p class='small-note'>Seleccioná una fila de la matriz para filtrar Dotación, Dotación Histórica, Antigüedad, Categoría y Detalle de Colaboradores.</p>",
         unsafe_allow_html=True
     )
 
-    selected_area = None
-    selected_sector = None
-    selected_puesto = None
+    # Controles de diagnóstico para confirmar si la matriz puede armarse
+    with st.expander("Ver diagnóstico de columnas", expanded=False):
+        st.write({
+            "Área": col_area,
+            "Sector": col_sector,
+            "Puesto": col_puesto,
+            "Localidad": col_localidad,
+            "Empresa": col_empresa,
+            "Filas disponibles para matriz": len(df_snap)
+        })
+        st.write("Columnas disponibles en la base:")
+        st.write(df_snap.columns.tolist())
 
-    if col_area and col_sector and col_puesto and col_localidad:
-        matriz_base = df_snap.copy()
+    matriz_interactiva = pd.DataFrame()
 
-        if matriz_base.empty:
-            st.info("No hay datos para mostrar con los filtros seleccionados.")
+    if col_area and col_sector and col_puesto and col_localidad and not df_snap.empty:
+        # Tabla plana a nivel Área > Sector > Puesto, con Localidades como columnas
+        pivot = pd.pivot_table(
+            df_snap,
+            index=[col_area, col_sector, col_puesto],
+            columns=col_localidad,
+            values=col_empresa,
+            aggfunc="count",
+            fill_value=0
+        ).reset_index()
+
+        if pivot.empty:
+            st.warning("La matriz quedó vacía con los filtros actuales.")
         else:
-            pivot = pd.pivot_table(
-                matriz_base,
-                index=[col_area, col_sector, col_puesto],
-                columns=col_localidad,
-                values=col_empresa,
-                aggfunc="count",
-                fill_value=0
-            ).reset_index()
-
             numeric_cols = [c for c in pivot.columns if c not in [col_area, col_sector, col_puesto]]
             pivot["Total"] = pivot[numeric_cols].sum(axis=1)
 
-            # Nombres visibles para que la matriz sea más clara
-            matriz_view = pivot.rename(columns={
+            # Renombramos solo para visualización, pero conservamos el vínculo con columnas originales
+            rename_matrix = {
                 col_area: "Área",
                 col_sector: "Sector",
                 col_puesto: "Puesto"
-            })
+            }
+            matriz_interactiva = pivot.rename(columns=rename_matrix)
 
-            gb = GridOptionsBuilder.from_dataframe(matriz_view)
-            gb.configure_default_column(
-                filter=True,
-                sortable=True,
-                resizable=True
-            )
-            gb.configure_selection("single", use_checkbox=False)
-            gb.configure_column("Área", pinned="left", width=150)
-            gb.configure_column("Sector", pinned="left", width=170)
-            gb.configure_column("Puesto", pinned="left", width=220)
-
-            for col in [c for c in matriz_view.columns if c not in ["Área", "Sector", "Puesto"]]:
-                gb.configure_column(
-                    col,
-                    type=["numericColumn", "numberColumnFilter"],
-                    aggFunc="sum",
-                    width=95
-                )
-
-            grid_options = gb.build()
-
-            grid_response = AgGrid(
-                matriz_view,
-                gridOptions=grid_options,
-                data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
-                update_mode=GridUpdateMode.SELECTION_CHANGED,
-                fit_columns_on_grid_load=True,
-                theme="alpine",
-                height=420,
-                allow_unsafe_jscode=True,
-                key="matriz_estructura_unica"
+            st.caption("Tip: hacé clic sobre una fila para usarla como filtro visual.")
+            matriz_event = st.dataframe(
+                matriz_interactiva,
+                use_container_width=True,
+                hide_index=True,
+                height=430,
+                on_select="rerun",
+                selection_mode="single-row",
+                key="matriz_estructura_interactiva"
             )
 
-            selected = grid_response.get("selected_rows", [])
-            if isinstance(selected, pd.DataFrame) and not selected.empty:
-                selected_row = selected.iloc[0].to_dict()
-            elif isinstance(selected, list) and len(selected) > 0:
-                selected_row = selected[0]
-            else:
-                selected_row = None
-
-            if selected_row:
-                selected_area = selected_row.get("Área")
-                selected_sector = selected_row.get("Sector")
-                selected_puesto = selected_row.get("Puesto")
+            selected_rows = matriz_event.selection.rows if hasattr(matriz_event, "selection") else []
+            if selected_rows:
+                row = matriz_interactiva.iloc[selected_rows[0]].to_dict()
+                selected_area = row.get("Área")
+                selected_sector = row.get("Sector")
+                selected_puesto = row.get("Puesto")
     else:
-        st.info("Faltan columnas clave para armar la matriz: Área, Sector, Puesto o Localidad.")
+        st.warning(
+            f"""
+            No se puede construir la matriz.
 
-    # -----------------------------------------------------
-    # FILTRO GENERADO DESDE LA MATRIZ
-    # -----------------------------------------------------
+            Columnas detectadas:
+            - Área: {col_area}
+            - Sector: {col_sector}
+            - Puesto: {col_puesto}
+            - Localidad: {col_localidad}
+
+            Filas disponibles: {len(df_snap)}
+            """
+        )
+
+    # -----------------------------------------
+    # DATAFRAME FILTRADO POR SELECCIÓN DE MATRIZ
+    # -----------------------------------------
     df_estructura_filtrado = df_snap.copy()
 
-    if selected_area and col_area:
-        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_area] == selected_area]
-    if selected_sector and col_sector:
-        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_sector] == selected_sector]
-    if selected_puesto and col_puesto:
-        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_puesto] == selected_puesto]
-
+    if selected_area:
+        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_area].astype(str) == str(selected_area)]
+    if selected_sector:
+        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_sector].astype(str) == str(selected_sector)]
     if selected_puesto:
-        filtro_texto = f"{selected_area} > {selected_sector} > {selected_puesto}"
-    elif selected_sector:
-        filtro_texto = f"{selected_area} > {selected_sector}"
-    elif selected_area:
-        filtro_texto = str(selected_area)
-    else:
-        filtro_texto = "Sin selección en matriz"
+        df_estructura_filtrado = df_estructura_filtrado[df_estructura_filtrado[col_puesto].astype(str) == str(selected_puesto)]
 
-    # -----------------------------------------------------
+    # -----------------------------------------
     # INDICADORES Y GRÁFICOS FILTRADOS
-    # -----------------------------------------------------
+    # -----------------------------------------
     c1, c2 = st.columns([1, 3])
 
     with c1:
         metric_card("Dotación", len(df_estructura_filtrado))
-        st.caption(f"Filtro visual: {filtro_texto}")
+
+        if selected_puesto:
+            st.caption(f"Filtro matriz: {selected_area} > {selected_sector} > {selected_puesto}")
+        elif selected_sector:
+            st.caption(f"Filtro matriz: {selected_area} > {selected_sector}")
+        elif selected_area:
+            st.caption(f"Filtro matriz: {selected_area}")
+        else:
+            st.caption("Sin selección en matriz")
 
     with c2:
         df_hist = build_dotacion_history(
             fecha_corte,
             area=selected_area if selected_area else (None if sel_area == "Todas" else sel_area),
-            sector=selected_sector,
-            puesto=selected_puesto,
             localidad=None if sel_localidad == "Todas" else sel_localidad,
             online="Todos" if sel_online == "Todos" else sel_online
         )
@@ -903,9 +888,9 @@ with tabs[0]:
             )
             st.plotly_chart(fig_cat, use_container_width=True)
 
-    # -----------------------------------------------------
+    # -----------------------------------------
     # DETALLE DE COLABORADORES FILTRADO
-    # -----------------------------------------------------
+    # -----------------------------------------
     st.markdown("---")
     st.markdown("### Detalle de Colaboradores")
 
@@ -922,11 +907,11 @@ with tabs[0]:
             col_area: "Área",
             col_localidad: "Localidad"
         }
-        df_view = (
-            df_estructura_filtrado[cols_to_show]
-            .rename(columns=rename_map)
-            .sort_values("Colaborador", ascending=True)
-        )
+
+        df_view = df_estructura_filtrado[cols_to_show].rename(columns=rename_map)
+        if "Colaborador" in df_view.columns:
+            df_view = df_view.sort_values("Colaborador", ascending=True)
+
         st.dataframe(
             df_view,
             use_container_width=True,
