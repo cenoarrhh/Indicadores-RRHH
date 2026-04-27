@@ -7,6 +7,7 @@ from datetime import datetime
 import calendar
 import unicodedata
 import re
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
 # =========================================================
 # 1. CONFIGURACIÓN GENERAL
@@ -31,6 +32,7 @@ st.markdown(
     /* Ocultar header nativo de streamlit para ahorrar espacio */
     header[data-testid="stHeader"] {
         background-color: transparent;
+        height: 0px;
     }
 
     .stApp {
@@ -76,28 +78,30 @@ st.markdown(
         margin-top: 4px;
     }
     
-    /* Encabezado Principal Sticky */
-    .sticky-header-container {
+    /* Encabezado Principal Sticky usando :has() */
+    div[data-testid="element-container"]:has(#mi-cabecera-fija) {
         position: sticky;
         top: 0px;
         z-index: 1000;
-        background-color: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(5px);
+        background-color: rgba(255, 255, 255, 0.98);
         padding-top: 15px;
         padding-bottom: 10px;
-        margin-top: -1rem;
+        margin-top: -15px;
+        margin-left: -1rem;
+        margin-right: -1rem;
+        padding-left: 1rem;
+        padding-right: 1rem;
         border-bottom: 2px solid #F0F0F0;
     }
 
     /* Tabs Sticky y Mejorados */
     div[data-testid="stTabs"] > div[data-baseweb="tab-list"] {
         position: sticky;
-        top: 75px; /* Altura aproximada del header */
+        top: 70px; /* Altura aproximada del header */
         z-index: 990;
-        background-color: rgba(255, 255, 255, 0.95);
-        backdrop-filter: blur(5px);
-        padding-top: 1rem;
-        padding-bottom: 0.5rem;
+        background-color: rgba(255, 255, 255, 0.98);
+        padding-top: 10px;
+        padding-bottom: 5px;
         border-bottom: 2px solid #F0F0F0;
         gap: 8px;
     }
@@ -105,6 +109,7 @@ st.markdown(
         border-radius: 8px 8px 0px 0px;
         padding: 10px 20px;
         border: 1px solid transparent;
+        background-color: white;
     }
     .stTabs [aria-selected="true"] {
         background-color: #EB0A1E !important;
@@ -114,7 +119,7 @@ st.markdown(
     }
     
     /* Dataframe Header styling */
-    [data-testid="stDataFrame"] {
+    [data-testid="stDataFrame"], .ag-theme-alpine {
         border-radius: 8px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         border: 1px solid #E5E5E5;
@@ -705,6 +710,7 @@ def dias_laborables_estimados(anio, mes):
 # =========================================================
 st.markdown(
     f"""
+    <div id="mi-cabecera-fija"></div>
     <div class="sticky-header-container">
         <div style="display: flex; justify-content: space-between; align-items: flex-start;">
             <div>
@@ -753,60 +759,83 @@ with tabs[0]:
 
     with left:
         st.markdown("### Matriz de Dotación Dinámica")
-        st.markdown("<p class='small-note'>Haz clic en una fila para desglosar el nivel inferior.</p>", unsafe_allow_html=True)
+        st.markdown("<p class='small-note'>Expande las filas (+) para ver el desglose. Haz clic en una fila para ver el detalle de colaboradores abajo.</p>", unsafe_allow_html=True)
         
-        def dynamic_pivot(df, index_col, selection_key):
-            if index_col not in df.columns or col_localidad not in df.columns:
-                return None, None
-            pivot = pd.pivot_table(
-                df,
-                index=index_col,
-                columns=col_localidad,
-                values=col_empresa,
-                aggfunc="count",
-                fill_value=0,
-                margins=True,
-                margins_name="Total"
-            )
-            # Reordenar 'Total' al final
-            if "Total" in pivot.index:
-                total_row = pivot.loc[["Total"]]
-                pivot = pd.concat([pivot.drop("Total"), total_row])
-                
-            event = st.dataframe(
-                pivot,
-                use_container_width=True,
-                selection_mode="single-row",
-                on_select="rerun",
-                key=selection_key
-            )
-            selected_idx = None
-            if len(event.selection.rows) > 0:
-                row_num = event.selection.rows[0]
-                selected_idx = pivot.index[row_num]
-                if selected_idx == "Total":
-                    selected_idx = None
-            return pivot, selected_idx
-
         selected_area = None
         selected_sector = None
         selected_puesto = None
 
-        if col_area and col_sector and col_puesto:
-            st.markdown("#### Nivel 1: Áreas")
-            pivot_area, selected_area = dynamic_pivot(df_snap, col_area, "matrix_area")
+        if col_area and col_sector and col_puesto and col_localidad:
+            # Crear la tabla base agrupando por niveles y pivotando por localidad
+            pivot = pd.pivot_table(
+                df_snap,
+                index=[col_area, col_sector, col_puesto],
+                columns=col_localidad,
+                values=col_empresa,
+                aggfunc="count",
+                fill_value=0
+            ).reset_index()
             
-            if selected_area:
-                st.markdown(f"#### Nivel 2: Sectores en '{selected_area}'")
-                df_sector = df_snap[df_snap[col_area] == selected_area]
-                pivot_sector, selected_sector = dynamic_pivot(df_sector, col_sector, "matrix_sector")
+            # Calcular Total por fila
+            numeric_cols = [c for c in pivot.columns if c not in [col_area, col_sector, col_puesto]]
+            pivot["Total"] = pivot[numeric_cols].sum(axis=1)
+            
+            # Configurar AgGrid
+            gb = GridOptionsBuilder.from_dataframe(pivot)
+            
+            # Configurar agrupaciones
+            gb.configure_column(col_area, rowGroup=True, hide=True)
+            gb.configure_column(col_sector, rowGroup=True, hide=True)
+            gb.configure_column(col_puesto, rowGroup=True, hide=True)
+            
+            # Configurar columnas numéricas para sumar en los grupos
+            for col in numeric_cols + ["Total"]:
+                gb.configure_column(
+                    col, 
+                    type=["numericColumn", "numberColumnFilter"], 
+                    aggFunc="sum"
+                )
+            
+            gb.configure_selection('single', use_checkbox=False)
+            
+            gridOptions = gb.build()
+            gridOptions["groupDisplayType"] = "singleColumn"
+            gridOptions["autoGroupColumnDef"] = {
+                "headerName": "Estructura (Área > Sector > Puesto)",
+                "minWidth": 300,
+                "cellRendererParams": {
+                    "suppressCount": True
+                }
+            }
+            
+            # Renderizar Grid
+            grid_response = AgGrid(
+                pivot,
+                gridOptions=gridOptions,
+                data_return_mode=DataReturnMode.AS_INPUT,
+                update_mode=GridUpdateMode.SELECTION_CHANGED,
+                fit_columns_on_grid_load=True,
+                theme='alpine',
+                height=500
+            )
+            
+            # Capturar selección
+            selected = grid_response.get("selected_rows", [])
+            # En la versión comunitaria, selected_rows puede devolver DataFrame o list de dicts
+            if isinstance(selected, pd.DataFrame) and not selected.empty:
+                row = selected.iloc[0].to_dict()
+            elif isinstance(selected, list) and len(selected) > 0:
+                row = selected[0]
+            else:
+                row = None
                 
-                if selected_sector:
-                    st.markdown(f"#### Nivel 3: Puestos en '{selected_sector}'")
-                    df_puesto = df_sector[df_sector[col_sector] == selected_sector]
-                    pivot_puesto, selected_puesto = dynamic_pivot(df_puesto, col_puesto, "matrix_puesto")
+            if row:
+                selected_area = row.get(col_area)
+                selected_sector = row.get(col_sector)
+                selected_puesto = row.get(col_puesto)
+                
         else:
-            st.info("No fue posible construir la matriz dinámica con las columnas actuales.")
+            st.info("Faltan columnas clave (Área, Sector, Puesto o Localidad) para armar la matriz dinámica.")
 
     with right:
         ant_df = build_antiguedad_data(df_snap)
